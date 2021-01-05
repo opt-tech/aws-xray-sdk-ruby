@@ -17,6 +17,7 @@ module XRay
           pool, conn = get_pool_n_conn(payload[:connection_id])
 
           return if IGNORE_OPS.include?(payload[:name]) || pool.nil? || conn.nil?
+
           # The spec notation is Rails < 6.1, later this can be found in the db_config
           db_config = if pool.respond_to?(:spec)
                         pool.spec.config
@@ -24,9 +25,11 @@ module XRay
                         pool.db_config.config.symbolize_keys
                       end
           name, sql = build_name_sql_meta config: db_config, conn: conn
+          sql[:sanitized_query] = payload[:sql]
           subsegment = XRay.recorder.begin_subsegment name, namespace: 'remote'
           # subsegment is nil in case of context missing
           return if subsegment.nil?
+
           subsegment.start_time = transaction.time.to_f
           subsegment.sql = sql
           XRay.recorder.end_subsegment end_time: transaction.end.to_f
@@ -53,7 +56,8 @@ module XRay
         end
 
         def get_pool_n_conn(conn_id)
-          pool, conn = nil, nil
+          pool = nil
+          conn = nil
           ::ActiveRecord::Base.connection_handler.connection_pool_list.each do |p|
             conn = p.connections.select { |c| c.object_id == conn_id }
             pool = p unless conn.nil?
